@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from io import BytesIO
 from pathlib import Path
 
 import pytest
 
-from coffeecode_uploader import File, Media, Send, UploaderException
+from coffeecode_uploader import File, Media, Send, UploadedFile, UploaderException
 
 
 def test_file_upload_pdf(workdir, make_blob):
@@ -15,6 +16,19 @@ def test_file_upload_pdf(workdir, make_blob):
     assert Path(path).read_bytes().startswith(b"%PDF-")
 
 
+def test_file_upload_from_stream(workdir):
+    f = File("uploads", "files", month_year_path=False)
+    payload = b"%PDF-stream"
+    upload = UploadedFile.from_stream(
+        BytesIO(payload),
+        filename="anything.pdf",
+        content_type="application/pdf",
+    )
+    path = f.upload(upload, "Stream Doc")
+    assert path == "uploads/files/stream-doc.pdf"
+    assert Path(path).read_bytes() == payload
+
+
 def test_file_rejects_bad_mime(workdir, make_blob):
     f = File("uploads", "files", month_year_path=False)
     with pytest.raises(UploaderException):
@@ -23,7 +37,6 @@ def test_file_rejects_bad_mime(workdir, make_blob):
 
 def test_file_rejects_bad_extension(workdir, make_blob):
     f = File("uploads", "files", month_year_path=False)
-    # mime allowed but extension not
     blob = make_blob("x.exe", "application/pdf")
     with pytest.raises(UploaderException):
         f.upload(blob, "x")
@@ -68,17 +81,11 @@ def test_send_rejects_outside_allowed(workdir, make_blob):
 
 
 def test_send_class_level_allow_lists_match_php(workdir):
-    """Send mutates class-level allow lists (mirrors PHP self::$allowTypes).
-
-    Constructing a new Send instance overrides the previous one's allow lists —
-    same behavior as the original PHP package. Use distinct Send subclasses
-    if you need isolation.
-    """
+    """Send mutates class-level allow lists (mirrors PHP self::$allowTypes)."""
     Send("uploads", "a", ["application/postscript"], ["ai"], month_year_path=False)
     assert "application/postscript" in Send.is_allowed()
     assert "ai" in Send.is_extension()
 
     Send("uploads", "b", ["application/pdf"], ["pdf"], month_year_path=False)
-    # Latest construction wins (PHP-equivalent).
     assert "application/pdf" in Send.is_allowed()
     assert "application/postscript" not in Send.is_allowed()

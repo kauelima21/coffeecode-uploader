@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 from PIL import Image as PILImage
 
@@ -22,6 +20,14 @@ def test_upload_jpeg_keeps_size_when_target_larger(workdir, make_jpeg):
     path = image.upload(make_jpeg(size=(400, 300)), "small", width=2000)
     with PILImage.open(path) as out:
         assert out.size == (400, 300)
+
+
+def test_upload_jpeg_from_stream(workdir, jpeg_stream):
+    image = Image("uploads", "images", month_year_path=False)
+    path = image.upload(jpeg_stream(size=(1024, 768)), "from-stream", width=512)
+    assert path == "uploads/images/from-stream.jpg"
+    with PILImage.open(path) as out:
+        assert out.size == (512, 384)
 
 
 def test_upload_png_preserves_alpha(workdir, make_png):

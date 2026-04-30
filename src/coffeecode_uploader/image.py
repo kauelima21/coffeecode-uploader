@@ -5,7 +5,8 @@ from typing import ClassVar, Optional
 from PIL import Image as PILImage
 
 from .exceptions import UploaderException
-from .uploader import FileDict, Uploader
+from .uploaded_file import UploadedFile
+from .uploader import Uploader
 
 
 class Image(Uploader):
@@ -19,60 +20,54 @@ class Image(Uploader):
 
     _extensions: ClassVar[list[str]] = [
         "jpg",
+        "jpeg",
         "png",
         "gif",
     ]
 
     def upload(
         self,
-        image: FileDict,
+        image: UploadedFile,
         name: str,
         width: int = 2000,
         quality: Optional[dict[str, int]] = None,
     ) -> str:
-        if not image.get("type"):
+        if not image.content_type:
             raise UploaderException("Not a valid data from image")
 
-        if not self._image_create(image):
+        if image.content_type not in self._allow_types:
+            raise UploaderException("Not a valid image type or extension")
+
+        # Internal canonical extension (jpeg → jpg)
+        mime = image.content_type
+        if mime == "image/jpeg":
+            self.ext = "jpg"
+        elif mime == "image/png":
+            self.ext = "png"
+        elif mime == "image/gif":
+            self.ext = "gif"
+        else:
             raise UploaderException("Not a valid image type or extension")
 
         self._name(name)
         dst = f"{self.path}/{self.name}"
 
         if self.ext == "gif":
-            self._move(image["tmp_name"], dst)
+            image.save_to(dst)
             return dst
 
         q = quality if quality is not None else {"jpg": 75, "png": 5}
-        self._image_generate(width, q)
+        with image.open() as src:
+            self.file = PILImage.open(src)
+            self.file.load()
+        self._image_generate(width, q, dst)
         return dst
 
-    def _image_create(self, image: FileDict) -> bool:
-        mime = image.get("type")
-        tmp = image["tmp_name"]
-
-        if mime == "image/jpeg":
-            self.file = PILImage.open(tmp)
-            self.ext = "jpg"
-            return True
-
-        if mime == "image/png":
-            self.file = PILImage.open(tmp)
-            self.ext = "png"
-            return True
-
-        if mime == "image/gif":
-            self.ext = "gif"
-            return True
-
-        return False
-
-    def _image_generate(self, width: int, quality: dict[str, int]) -> None:
+    def _image_generate(self, width: int, quality: dict[str, int], dst_path: str) -> None:
         src: PILImage.Image = self.file
         file_x, file_y = src.size
         image_w = width if width < file_x else file_x
         image_h = int((image_w * file_y) / file_x)
-        dst_path = f"{self.path}/{self.name}"
 
         if self.ext == "jpg":
             converted = src.convert("RGB") if src.mode != "RGB" else src

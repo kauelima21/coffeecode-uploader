@@ -1,12 +1,9 @@
 """Exemplo Flask: envio de midia (equivalente a example/media.php)."""
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
-
 from flask import Flask, request
 
-from coffeecode_uploader import Media, UploaderException
+from coffeecode_uploader import Media, UploadedFile, UploaderException
 
 app = Flask(__name__)
 HTML = """
@@ -24,21 +21,13 @@ HTML = """
 def index():
     result = ""
     if request.method == "POST" and "file" in request.files:
-        upload = request.files["file"]
-        with tempfile.NamedTemporaryFile(delete=False) as tmp:
-            upload.save(tmp.name)
-            tmp_path = tmp.name
         try:
+            upload = UploadedFile.from_flask(request.files["file"])
             m = Media("uploads", "medias")
-            path = m.upload(
-                {"name": upload.filename, "type": upload.mimetype, "tmp_name": tmp_path},
-                request.form["name"],
-            )
+            path = m.upload(upload, request.form["name"])
             result = f"<p><a href='/{path}' target='_blank'>@CoffeeCode</a></p>"
         except UploaderException as e:
             result = f"<p>(!) {e}</p>"
-        finally:
-            Path(tmp_path).unlink(missing_ok=True)
     return HTML.format(result=result)
 
 

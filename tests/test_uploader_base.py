@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from coffeecode_uploader import File
+from coffeecode_uploader import File, UploadedFile
 from coffeecode_uploader.uploader import Uploader
 
 
@@ -35,22 +37,23 @@ def test_constructor_without_year_month_path(workdir):
 def test_is_allowed_and_is_extension_classmethods():
     assert "application/pdf" in File.is_allowed()
     assert "pdf" in File.is_extension()
-    # PHP-style alias preserved
     assert File.isAllowed() == File.is_allowed()
     assert File.isExtension() == File.is_extension()
 
 
-def test_multiple_translates_php_files_array(workdir):
-    f = File("uploads", "files", month_year_path=False)
-    files = {
-        "uploads": {
-            "name": ["a.pdf", "b.pdf"],
-            "type": ["application/pdf", "application/pdf"],
-            "tmp_name": ["/tmp/a", "/tmp/b"],
-        }
-    }
-    out = f.multiple("uploads", files)
-    assert out == [
-        {"name": "a.pdf", "type": "application/pdf", "tmp_name": "/tmp/a"},
-        {"name": "b.pdf", "type": "application/pdf", "tmp_name": "/tmp/b"},
+def test_multiple_normalizes_mixed_inputs(tmp_path):
+    a = tmp_path / "a.pdf"
+    a.write_bytes(b"%PDF-")
+    items = [
+        {"name": "b.pdf", "type": "application/pdf", "tmp_name": str(a)},
+        UploadedFile.from_path(a, content_type="application/pdf", filename="c.pdf"),
+        SimpleNamespace(filename="d.pdf", mimetype="application/pdf", stream=BytesIO(b"x")),
     ]
+    out = Uploader.multiple(items)
+    assert [u.filename for u in out] == ["b.pdf", "c.pdf", "d.pdf"]
+    assert all(isinstance(u, UploadedFile) for u in out)
+
+
+def test_multiple_rejects_unknown_type():
+    with pytest.raises(TypeError):
+        Uploader.multiple([42])

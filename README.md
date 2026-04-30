@@ -1,22 +1,26 @@
 # Uploader (Python)
 
 Port em Python do pacote PHP [coffeecode/uploader](https://github.com/robsonvleite/uploader)
-de Robson V. Leite. Mantem a mesma API e o mesmo comportamento: classes pequenas
-para enviar imagens, arquivos e midias recebidos por um formulario, com gestao
-de diretorios por ano/mes e validacao por mime-type/extensao.
+de Robson V. Leite. Mantem o comportamento original (validacao por mime/extensao,
+diretorios `YYYY/MM`, slug, redimensionamento de imagens) com uma API
+**framework-agnostica** baseada em `UploadedFile` — aceita path em disco ou
+stream em memoria, com adapters prontos para Flask e FastAPI.
 
 > Python port of the PHP package [coffeecode/uploader](https://github.com/robsonvleite/uploader)
-> by Robson V. Leite. It mirrors the original API and behavior: small classes
-> to upload images, files and media from a form, with year/month directory
-> management and mime-type/extension validation.
+> by Robson V. Leite. Same behavior (mime/extension validation, year/month
+> directories, slugged filenames, image resizing) with a framework-agnostic
+> `UploadedFile` API: accepts a filesystem path or an in-memory stream, with
+> built-in adapters for Flask and FastAPI.
 
 ## Destaques
 
 - Upload simples de imagens, arquivos e midias
+- `UploadedFile`: abstracao unica para path em disco ou stream
+- Adapters: `from_flask`, `from_fastapi`, `from_stream`, `from_path`,
+  `from_dict` (compat com PHP `$_FILES`)
 - Gestao de diretorios com esquema de datas (`YYYY/MM`)
 - Validacao por mime-type e extensao
 - Redimensionamento e qualidade de imagem (substitui `ext-gd` por **Pillow**)
-- API equivalente a do pacote PHP original
 
 ## Instalacao
 
@@ -28,71 +32,79 @@ Requer Python >= 3.9 e Pillow >= 10.
 
 ## Uso
 
-A entrada e um dicionario com as chaves `name`, `type` e `tmp_name` (mesmo
-formato de `$_FILES` no PHP). Em frameworks como Flask ou FastAPI basta
-montar esse dicionario a partir do arquivo recebido.
-
-### Image
+### Flask
 
 ```python
-from coffeecode_uploader import Image, UploaderException
+from flask import Flask, request
+from coffeecode_uploader import Image, UploadedFile, UploaderException
 
-image = Image("uploads", "images")            # com pastas ano/mes
-# image = Image("uploads", "images", False)   # SEM pastas de ano e mes
-
-try:
-    file = {
-        "name": request.files["image"].filename,
-        "type": request.files["image"].mimetype,
-        "tmp_name": "/tmp/upload.jpg",
-    }
-    path = image.upload(file, "Foto Perfil")        # width=2000, quality auto
-    # path = image.upload(file, "Foto", 1280, {"jpg": 80, "png": 6})
-except UploaderException as e:
-    print(f"(!) {e}")
+@app.post("/avatar")
+def avatar():
+    try:
+        upload = UploadedFile.from_flask(request.files["image"])
+        path = Image("uploads", "images").upload(upload, request.form["name"])
+        return {"path": path}
+    except UploaderException as e:
+        return {"error": str(e)}, 400
 ```
 
-### File
+### FastAPI
 
 ```python
-from coffeecode_uploader import File
+from fastapi import FastAPI, File, UploadFile, HTTPException
+from coffeecode_uploader import Image, UploadedFile, UploaderException
 
-f = File("uploads", "files")
-path = f.upload(
-    {"name": "report.pdf", "type": "application/pdf", "tmp_name": "/tmp/r.pdf"},
-    "Relatorio Mensal",
-)
+app = FastAPI()
+
+@app.post("/avatar")
+async def avatar(name: str, image: UploadFile = File(...)):
+    try:
+        upload = UploadedFile.from_fastapi(image)
+        path = Image("uploads", "images").upload(upload, name)
+        return {"path": path}
+    except UploaderException as e:
+        raise HTTPException(400, str(e))
 ```
 
-### Media
+### Stream em memoria
 
 ```python
-from coffeecode_uploader import Media
+from io import BytesIO
+from coffeecode_uploader import File, UploadedFile
 
-m = Media("uploads", "medias")
-path = m.upload(
-    {"name": "track.mp3", "type": "audio/mpeg", "tmp_name": "/tmp/t.mp3"},
-    "Minha Musica",
+upload = UploadedFile.from_stream(
+    BytesIO(pdf_bytes),
+    filename="report.pdf",
+    content_type="application/pdf",
 )
+path = File("uploads", "files").upload(upload, "Relatorio Mensal")
 ```
 
-### Send (tipos customizados)
+### Path ja em disco
 
 ```python
-from coffeecode_uploader import Send
+from coffeecode_uploader import File, UploadedFile
 
-postscript = Send(
-    "uploads",
-    "postscript",
-    allow_types=["application/postscript"],
-    extensions=["ai"],
-)
-path = postscript.upload(file_dict, "Logo")
+upload = UploadedFile.from_path("/tmp/report.pdf", content_type="application/pdf")
+path = File("uploads", "files").upload(upload, "Relatorio")
+```
+
+### Compat com `$_FILES` (PHP-style)
+
+```python
+from coffeecode_uploader import File, UploadedFile
+
+upload = UploadedFile.from_dict({
+    "name": "report.pdf",
+    "type": "application/pdf",
+    "tmp_name": "/tmp/upload.pdf",
+})
+path = File("uploads", "files").upload(upload, "Relatorio")
 ```
 
 ## API
 
-### Construtor (todas as classes)
+### Construtores
 
 ```python
 Image(upload_dir, file_type_dir, month_year_path=True)
@@ -101,7 +113,7 @@ Media(upload_dir, file_type_dir, month_year_path=True)
 Send(upload_dir, file_type_dir, allow_types, extensions, month_year_path=True)
 ```
 
-### `upload(file_dict, name, ...)`
+### `upload(file: UploadedFile, name: str, ...)`
 
 Retorna a string com o caminho final relativo. Lanca `UploaderException`
 quando o tipo MIME ou a extensao nao estao na lista permitida.
@@ -113,22 +125,39 @@ quando o tipo MIME ou a extensao nao estao na lista permitida.
 - `Media.upload(media, name)`
 - `Send.upload(file, name)`
 
+### `UploadedFile`
+
+| Metodo                                      | Quando usar                                      |
+|---------------------------------------------|--------------------------------------------------|
+| `UploadedFile.from_flask(file_storage)`     | `request.files["x"]` em Flask/Quart              |
+| `UploadedFile.from_fastapi(upload_file)`    | `UploadFile` em FastAPI/Starlette                |
+| `UploadedFile.from_stream(stream, ...)`     | `BytesIO`, S3 body, qualquer file-like binario   |
+| `UploadedFile.from_path(path, content_type)`| Arquivo ja em disco                              |
+| `UploadedFile.from_dict({...})`             | Compat com `$_FILES` PHP                         |
+| `.open()`                                   | Context manager → file-like binario              |
+| `.save_to(dst)`                             | Copia para `dst` (preserva o source)             |
+| `.extension`                                | Extensao em lowercase a partir de `filename`     |
+
 ### Helpers
 
 - `Cls.is_allowed()` (alias `Cls.isAllowed()`) — lista de mime-types permitidos.
 - `Cls.is_extension()` (alias `Cls.isExtension()`) — lista de extensoes permitidas.
-- `instance.multiple(input_name, files)` — converte um envio multiplo no
-  formato `$_FILES` em uma lista de dicionarios individuais.
+- `Uploader.multiple([...])` — converte lista heterogenea (dict, FileStorage,
+  UploadFile, UploadedFile) em `list[UploadedFile]`.
 
-## Comportamento de nome
+## Migrar de v1.x
 
-O slug e gerado a partir de `name` com:
+A v1 aceitava um dict no formato PHP `$_FILES`. Em v2 use `UploadedFile`:
 
-1. lowercase
-2. normalizacao Unicode (NFKD) + remocao de acentos
-3. caracteres nao alfanumericos viram `-`
-4. extensao do arquivo original e anexada
-5. se o arquivo final ja existir, `-{timestamp_unix}` e adicionado
+```python
+# v1
+file_dict = {"name": "x.pdf", "type": "application/pdf", "tmp_name": "/tmp/x"}
+File("uploads", "files").upload(file_dict, "Doc")
+
+# v2
+upload = UploadedFile.from_dict(file_dict)
+File("uploads", "files").upload(upload, "Doc")
+```
 
 ## Equivalencia com a versao PHP
 
@@ -139,8 +168,8 @@ O slug e gerado a partir de `name` com:
 | `CoffeeCode\Uploader\Media`               | `coffeecode_uploader.Media`               |
 | `CoffeeCode\Uploader\Send`                | `coffeecode_uploader.Send`                |
 | `Exception`                               | `UploaderException`                       |
-| `$_FILES['x']`                            | `dict` com `name`, `type`, `tmp_name`     |
-| `move_uploaded_file()`                    | `shutil.move` (com fallback `copyfile`)   |
+| `$_FILES['x']`                            | `UploadedFile.from_dict({...})`           |
+| `move_uploaded_file()`                    | `UploadedFile.save_to()`                  |
 | `ext-gd`                                  | `Pillow`                                  |
 | `monthYearPath`                           | `month_year_path`                         |
 

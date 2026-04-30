@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from .exceptions import UploaderException
-from .uploader import FileDict, Uploader
+from .uploaded_file import UploadedFile
+from .uploader import Uploader
 
 
 class Media(Uploader):
@@ -20,11 +20,10 @@ class Media(Uploader):
         "mp4",
     ]
 
-    def upload(self, media: FileDict, name: str) -> str:
-        self._ext(media)
-        if media.get("type") not in self._allow_types or self.ext not in self._extensions:
-            raise UploaderException("Not a valid media type or extension")
+    def upload(self, media: UploadedFile, name: str) -> str:
+        self._validate(media, self._allow_types, self._extensions)
+        self._set_ext(media)
         self._name(name)
         dst = f"{self.path}/{self.name}"
-        self._move(media["tmp_name"], dst)
+        media.save_to(dst)
         return dst

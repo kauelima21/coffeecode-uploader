@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import ClassVar
 
-from .exceptions import UploaderException
-from .uploader import FileDict, Uploader
+from .uploaded_file import UploadedFile
+from .uploader import Uploader
 
 
 class File(Uploader):
@@ -37,11 +37,10 @@ class File(Uploader):
         "odt",
     ]
 
-    def upload(self, file: FileDict, name: str) -> str:
-        self._ext(file)
-        if file.get("type") not in self._allow_types or self.ext not in self._extensions:
-            raise UploaderException("Not a valid file type or extension")
+    def upload(self, file: UploadedFile, name: str) -> str:
+        self._validate(file, self._allow_types, self._extensions)
+        self._set_ext(file)
         self._name(name)
         dst = f"{self.path}/{self.name}"
-        self._move(file["tmp_name"], dst)
+        file.save_to(dst)
         return dst

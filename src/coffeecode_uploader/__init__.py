@@ -3,6 +3,7 @@ from .file import File
 from .image import Image
 from .media import Media
 from .send import Send
+from .uploaded_file import UploadedFile
 from .uploader import Uploader
 
 __all__ = [
@@ -11,7 +12,8 @@ __all__ = [
     "File",
     "Media",
     "Send",
+    "UploadedFile",
     "UploaderException",
 ]
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"

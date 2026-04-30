@@ -3,7 +3,6 @@ from __future__ import annotations
 import html
 import os
 import re
-import shutil
 import time
 import unicodedata
 from abc import ABC
@@ -11,17 +10,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, ClassVar
 
-
-FileDict = dict[str, Any]
+from .uploaded_file import UploadedFile
 
 
 class Uploader(ABC):
     """Abstract base mirroring CoffeeCode\\Uploader\\Uploader (PHP).
 
-    A file dict mirrors PHP ``$_FILES[...]`` and must contain:
-        - ``name``: original filename (used for extension detection)
-        - ``type``: MIME type
-        - ``tmp_name``: filesystem path to the source/temporary file
+    Subclasses validate ``UploadedFile`` instances against
+    ``_allow_types`` (MIME) and ``_extensions`` (filename suffix), then
+    persist the file under ``upload_dir/file_type_dir[/YYYY/MM]``.
     """
 
     _allow_types: ClassVar[list[str]] = []
@@ -56,17 +53,26 @@ class Uploader(ABC):
     isAllowed = is_allowed
     isExtension = is_extension
 
-    def multiple(self, input_name: str, files: dict[str, dict[str, list[Any]]]) -> list[FileDict]:
-        """Convert PHP-style multi-input ``$_FILES`` into a list of single-file dicts."""
-        bucket = files[input_name]
-        keys = list(bucket.keys())
-        count = len(bucket["name"])
-        out: list[FileDict] = []
-        for i in range(count):
-            entry: FileDict = {}
-            for key in keys:
-                entry[key] = bucket[key][i]
-            out.append(entry)
+    @staticmethod
+    def multiple(files: list[Any]) -> list[UploadedFile]:
+        """Normalize a list of framework upload objects to ``UploadedFile``.
+
+        Accepts already-built ``UploadedFile`` instances, PHP-style dicts,
+        Flask ``FileStorage`` and FastAPI ``UploadFile``. Anything else falls
+        back to ``from_dict`` and will raise ``KeyError`` if shape differs.
+        """
+        out: list[UploadedFile] = []
+        for item in files:
+            if isinstance(item, UploadedFile):
+                out.append(item)
+            elif isinstance(item, dict):
+                out.append(UploadedFile.from_dict(item))
+            elif hasattr(item, "stream") and hasattr(item, "mimetype"):
+                out.append(UploadedFile.from_flask(item))
+            elif hasattr(item, "file") and hasattr(item, "content_type"):
+                out.append(UploadedFile.from_fastapi(item))
+            else:
+                raise TypeError(f"Unsupported upload object: {type(item).__name__}")
         return out
 
     def _name(self, name: str) -> str:
@@ -100,14 +106,12 @@ class Uploader(ABC):
         self._dir(f"{base}/{year}/{month}")
         self.path = f"{base}/{year}/{month}"
 
-    def _ext(self, file: FileDict) -> None:
-        ext = Path(file["name"]).suffix.lstrip(".").lower()
-        self.ext = ext
+    def _set_ext(self, file: UploadedFile) -> None:
+        self.ext = file.extension
 
     @staticmethod
-    def _move(src: str, dst: str) -> None:
-        """Move/copy uploaded file. Falls back to copy when src cannot be moved."""
-        try:
-            shutil.move(src, dst)
-        except (OSError, shutil.SameFileError):
-            shutil.copyfile(src, dst)
+    def _validate(file: UploadedFile, allow_types: list[str], extensions: list[str]) -> None:
+        from .exceptions import UploaderException
+
+        if file.content_type not in allow_types or file.extension not in extensions:
+            raise UploaderException("Not a valid file type or extension")
